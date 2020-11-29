@@ -16,7 +16,7 @@ As of the time of writing (11/29/2020), it is still WIP.
 ## Getting Started
 
 Pre-requisites:
-* Obtain an API key as described here: https://help.rallydev.com/rally-application-manager
+* Obtain a Rally API key as described here: https://help.rallydev.com/rally-application-manager
 * Install and configure GCP client, including a service account's JSON key file
 * Install Terraform (currently, ```v0.12.28```)
 * Install (if not already installed) Python 3.7 or later
