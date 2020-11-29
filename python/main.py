@@ -148,10 +148,10 @@ def insert_rows_into_bq(bq_client, bq_rows):
 # noinspection PyUnusedLocal
 def scheduler(event, context):
     rally, workspace, project = initialize_rally()
-    rally_scan_offset = int(os.getenv('RALLY_SCAN_OFFSET', '2'))
+    rally_scan_offset = int(os.getenv('RALLY_SCAN_OFFSET', '1'))
     from_date = (datetime.datetime.now() - datetime.timedelta(days=rally_scan_offset)).strftime('%Y-%m-%d')
     rally_items = get_stories_and_defects_from_rally(rally, workspace, project, "FormattedID,LastUpdateDate", from_date)
-    for i in rally_items: print(i)
+    for i in rally_items: print(i[:-1])
     print(f'Done.')
 
 
@@ -163,7 +163,7 @@ def updater(event, context):
     rally_id = base64.b64decode(event['data'])
     query = f'''FormattedID = "{rally_id}"'''
     print(f''' - fetching rally object {rally_id} ...''')
-    entity_type = 'HierarchicalRequirement'
+    entity_type = 'Defect' if rally_id[:2] == b'DE' else 'HierarchicalRequirement'
     rally_item = next((x for x in rally.get(entity_type, query=query, projectScopeDown=True, fetch=True)), None)
     if rally_item:
         bq_rows = extract_bq_rows_from_item(item(rally_item), root_project_name=project)
