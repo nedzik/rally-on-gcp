@@ -1,0 +1,3 @@
+google-cloud-pubsub==1.7.0
+google-cloud-bigquery==2.4.0
+pyral==1.4.1

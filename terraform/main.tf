@@ -1,0 +1,131 @@
+provider "google" {
+  region      = var.region
+  project     = var.project_name
+  credentials = file(var.credentials_file_path)
+  zone        = var.region_zone
+}
+
+resource "google_pubsub_topic" "topic" {
+  name = "job-topic"
+}
+
+resource "google_cloud_scheduler_job" "job" {
+  name        = "rally-job"
+  description = "a job to kick off the Rally updater"
+  schedule    = "*/15 * * * *"
+
+  pubsub_target {
+    topic_name = google_pubsub_topic.topic.id
+    data       = base64encode("test")
+  }
+}
+
+resource "google_storage_bucket" "deployment_bucket" {
+  name = "rally-on-gcp-001" # This bucket name must be unique
+}
+
+data "archive_file" "src" {
+  type        = "zip"
+  source_dir  = "${path.root}/../python"
+  output_path = "/tmp/function.zip"
+}
+
+resource "google_storage_bucket_object" "archive" {
+  name   = "${data.archive_file.src.output_md5}.zip"
+  bucket = google_storage_bucket.deployment_bucket.name
+  source = "/tmp/function.zip"
+}
+
+resource "google_cloudfunctions_function" "scheduler_function" {
+  name        = "scheduled-cloud-function"
+  description = "A Cloud Function that is triggered by a Cloud Schedule."
+  runtime     = "python37"
+
+  environment_variables = {
+    APIKEY = var.rally_api_key
+    RALLY_WORKSPACE = var.rally_workspace
+    RALLY_PROJECT = var.rally_project
+    RALLY_SCAN_OFFSET = var.rally_scan_offset
+  }
+
+  available_memory_mb   = 128
+  source_archive_bucket = google_storage_bucket.deployment_bucket.name
+  source_archive_object = google_storage_bucket_object.archive.name
+  timeout               = 500
+  entry_point           = "scheduler"
+
+  event_trigger {
+    event_type = "google.pubsub.topic.publish"
+    resource = google_pubsub_topic.topic.name
+  }
+}
+
+resource "google_bigquery_dataset" "rally" {
+  dataset_id                  = "rally"
+  friendly_name               = "rally"
+  description                 = "Dataset for Rally statistics"
+}
+
+resource "google_bigquery_table" "events" {
+  dataset_id = google_bigquery_dataset.rally.dataset_id
+  table_id   = "events"
+  schema = <<EOF
+[
+  {
+    "name": "rally_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Rally Object's Formatted ID"
+  },
+  {
+    "name": "schedule_state_id",
+    "type": "INTEGER",
+    "mode": "REQUIRED",
+    "description": "Scheduled State"
+  },
+  {
+    "name": "schedule_state_name",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Scheduled State"
+  },
+  {
+    "name": "event_type_id",
+    "type": "INTEGER",
+    "mode": "REQUIRED",
+    "description": "ARRIVAL or DEPARTURE"
+  },
+  {
+    "name": "event_type_name",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "ARRIVAL or DEPARTURE"
+  },
+  {
+    "name": "timestamp",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event's Timestamp"
+  },
+  {
+    "name": "author",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Name of Event's Author"
+  },
+  {
+    "name": "path_to_root",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Path to the Root Project"
+  },
+  {
+    "name": "flow_state",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Flow State"
+  }
+]
+EOF
+}
+
