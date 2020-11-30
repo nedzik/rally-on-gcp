@@ -48,7 +48,7 @@ Add ```STARTS_WITH(path_to_root, "<value>")``` to ```WHERE``` clause to filter.
 ```sql
 SELECT 
   departure as completion_date,
-  count(*) as througput 
+  count(*) as throughput 
 FROM 
   (
     SELECT rally_id, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
