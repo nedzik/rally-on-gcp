@@ -20,7 +20,7 @@ export RALLY_SCAN_OFFSET=1
 ## How to run the loader
 
 * Ensure the pre-requisites
-* Run the loader (replace ```2020-11-01``` with your date):
+* Run the loader (replace ```2020-11-01``` with your "from" date):
 ```bash
     python main.py loader 2020-11-01
 ```
