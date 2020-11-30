@@ -23,6 +23,12 @@ but you can just run ```terraform apply``` and fix the errors:
 * Cloud Scheduler
 * BigQuery
 
+Init your Terraform project:
+
+```bash
+terraform init
+```
+
 The actual command to deploy:
  
 ```bash
