@@ -25,8 +25,8 @@ export RALLY_SCAN_OFFSET=1
     python main.py loader 2020-11-01
 ```
 * The loader will show the progress - currently loading the data
-  from 07/01/2020 till 11/29/2020 takes about 30 minutes due to how Rally 
-  navigates its object graph.
+  from 07/01/2020 till 11/29/2020 for a ~150 strong org takes about 
+  30 minutes due to how Rally navigates its object graph.
   
 ## Testing Cloud Function Handler for Scheduler
 
