@@ -56,7 +56,7 @@ def get_stories_and_defects_from_rally(rally, workspace, project, fields, from_d
 
 
 # Helpers - Rally to BQ conversion
-def to_bq_row(rally_id, event_type, schedule_state, timestamp, author, path, flow_state):
+def to_bq_row(rally_id, event_type, schedule_state, timestamp, path, flow_state):
     return {
         u'rally_id': rally_id,
         u'schedule_state_id': SCHEDULE_STATE_ID_MAP.get(schedule_state, 99),
@@ -64,7 +64,6 @@ def to_bq_row(rally_id, event_type, schedule_state, timestamp, author, path, flo
         u'event_type_id': EVENT_TYPE_ID_MAP.get(event_type, 99),
         u'event_type_name': event_type,
         u'timestamp': timestamp,
-        u'author': author,
         u'path_to_root': path,
         u'flow_state': flow_state
     }
@@ -116,10 +115,10 @@ def extract_bq_rows_from_revision(rally_item_id, revision, project, root_project
         return [
             to_bq_row(
                 rally_item_id, 'DEPARTURE', schedule_state_change[1].upper(), revision.CreationDate,
-                revision.User.Name, path_to_root, flow_state_departure.upper()),
+                path_to_root, flow_state_departure.upper()),
             to_bq_row(
                 rally_item_id, 'ARRIVAL', schedule_state_change[2].upper(), revision.CreationDate,
-                revision.User.Name, path_to_root, flow_state_arrival.upper()
+                path_to_root, flow_state_arrival.upper()
             )
         ]
     return []

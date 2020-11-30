@@ -108,12 +108,6 @@ resource "google_bigquery_table" "events" {
     "description": "Event's Timestamp"
   },
   {
-    "name": "author",
-    "type": "STRING",
-    "mode": "NULLABLE",
-    "description": "Name of Event's Author"
-  },
-  {
     "name": "path_to_root",
     "type": "STRING",
     "mode": "REQUIRED",

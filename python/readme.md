@@ -57,4 +57,3 @@ python main.py updater <rally-formatted-id>
 
 * Add support for Ready-to-Pull
 * Add support for Blocked
-* Add support for Owner

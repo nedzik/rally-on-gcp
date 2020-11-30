@@ -7,7 +7,7 @@ Please, feel free to share your queries.
 Replace ```<value>``` with the path to your subproject.
 
 ```sql
-SELECT rally_id, schedule_state_name, event_type_name, timestamp, author, path_to_root FROM rally.events 
+SELECT rally_id, schedule_state_name, event_type_name, timestamp, path_to_root FROM rally.events 
 WHERE STARTS_WITH(path_to_root, "<value>") 
 ORDER By rally_id, timestamp, schedule_state_id;
 ```
