@@ -9,13 +9,12 @@ import datetime
 from google.cloud import bigquery
 from pyral import Rally, rallyWorkset
 
-
+SCHEDULE_EVENTS_TABLE='rally.schedule_events'
 SCHEDULE_STATE_CHANGE_EXPR = r'SCHEDULE STATE changed from \[(.+?)\] to \[(.+?)\]'
-FLOW_STATE_CHANGE_EXPR = r'FLOW STATE changed from \[(.+?)\] to \[(.+?)\]'
-READY_CHANGE_EXPR = r'READY changed from \[false\] to \[true\]'
-BLOCKED_SET_EXPR = r'BLOCKED changed from \[false\] to \[true\]'
-BLOCKED_REMOVED_EXPR = r'BLOCKED changed from \[true\] to \[false\]'
+READY_CHANGE_EXPR = r'READY changed from \[(.+?)\] to \[(.+?)\]'
+BLOCKED_STATE_CHANGE_EXPR = r'BLOCKED changed from \[(.+?)\] to \[(.+?)\]'
 TIMESTAMP_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+UNKNOWN = 'UNKNOWN'
 PATHS_TO_ROOT = {}
 SCHEDULE_STATE_ID_MAP = {
     'IDEA': 1,
@@ -27,7 +26,12 @@ SCHEDULE_STATE_ID_MAP = {
 }
 EVENT_TYPE_ID_MAP = {
     'DEPARTURE': 1,
-    'ARRIVAL': 2
+    'OTHER': 2,
+    'ARRIVAL': 3
+}
+STATE_ID_MAP = {
+    'true': 'ON',
+    'false': 'OFF'
 }
 
 
@@ -56,7 +60,7 @@ def get_stories_and_defects_from_rally(rally, workspace, project, fields, from_d
 
 
 # Helpers - Rally to BQ conversion
-def to_bq_row(rally_id, event_type, schedule_state, timestamp, path, flow_state):
+def to_bq_row(rally_id, event_type, schedule_state, timestamp, path, blocked_state, ready_state):
     return {
         u'rally_id': rally_id,
         u'schedule_state_id': SCHEDULE_STATE_ID_MAP.get(schedule_state, 99),
@@ -65,7 +69,8 @@ def to_bq_row(rally_id, event_type, schedule_state, timestamp, path, flow_state)
         u'event_type_name': event_type,
         u'timestamp': timestamp,
         u'path_to_root': path,
-        u'flow_state': flow_state
+        u'blocked_state': blocked_state,
+        u'ready_state': ready_state
     }
 
 
@@ -82,11 +87,61 @@ def get_path_to_root_project(rally_project, root_project_name, path=''):
         return path
 
 
-def extract_flow_states(r, schedule_state_change):
-    flow_state_change = next((re.finditer(FLOW_STATE_CHANGE_EXPR, r.Description)), None)
-    flow_state_departure = flow_state_change[1] if flow_state_change else schedule_state_change[1]
-    flow_state_arrival = flow_state_change[2] if flow_state_change else schedule_state_change[2]
-    return flow_state_arrival, flow_state_departure
+def extract_blocked_state(revision):
+    return extract_state(revision, BLOCKED_STATE_CHANGE_EXPR)
+
+
+def extract_ready_state(revision):
+    return extract_state(revision, READY_CHANGE_EXPR)
+
+
+def extract_state(revision, expr):
+    state = next((re.finditer(expr, revision.Description)), None)
+    return STATE_ID_MAP.get(state[2], UNKNOWN) if state else None
+
+
+def extract_bq_rows_from_revision(rally_item_id, revision, path_to_root):
+    schedule_state_change = next((re.finditer(SCHEDULE_STATE_CHANGE_EXPR, revision.Description)), None)
+    blocked_state_to = extract_blocked_state(revision)
+    ready_state_to = extract_ready_state(revision)
+    if schedule_state_change:
+        return [
+            to_bq_row(
+                rally_item_id, 'DEPARTURE', schedule_state_change[1].upper(), revision.CreationDate,
+                path_to_root, None, None
+            ),
+            to_bq_row(
+                rally_item_id, 'ARRIVAL', schedule_state_change[2].upper(), revision.CreationDate,
+                path_to_root, blocked_state_to, ready_state_to
+            )
+        ]
+    elif blocked_state_to or ready_state_to:
+        return [
+            to_bq_row(
+                rally_item_id, 'OTHER', UNKNOWN, revision.CreationDate, path_to_root,
+                blocked_state_to, ready_state_to
+            )
+        ]
+    return []
+
+
+def propagate_schedule_states(rows):
+    for index in range(1, len(rows)):
+        current, previous = rows[index], rows[index - 1]
+        if current[u'schedule_state_name'] == UNKNOWN and previous[u'schedule_state_name'] != UNKNOWN:
+            current[u'schedule_state_id'] = previous[u'schedule_state_id']
+            current[u'schedule_state_name'] = previous[u'schedule_state_name']
+    return rows
+
+
+def extract_bq_rows_from_item(item_to_process, root_project_name):
+    item_id, last_updated, rally_item = item_to_process
+    path_to_root = get_path_to_root_project(rally_item.Project, root_project_name)
+    revisions = rally_item.RevisionHistory.Revisions
+    revisions.reverse()
+    return propagate_schedule_states(functools.reduce(operator.iconcat, [
+        extract_bq_rows_from_revision(item_id, r, path_to_root) for r in revisions
+    ], []))
 
 
 def extract_bq_rows_from_items(items, root_project_name):
@@ -98,46 +153,33 @@ def extract_bq_rows_from_items(items, root_project_name):
     return bq_rows
 
 
-def extract_bq_rows_from_item(item_to_process, root_project_name):
-    item_id, last_updated, rally_item = item_to_process
-    rally_item.RevisionHistory.Revisions.reverse()
-    return functools.reduce(operator.iconcat, [
-        extract_bq_rows_from_revision(item_id, r, rally_item.Project, root_project_name) for r in
-        rally_item.RevisionHistory.Revisions
-    ], [])
-
-
-def extract_bq_rows_from_revision(rally_item_id, revision, project, root_project_name):
-    schedule_state_change = next((re.finditer(SCHEDULE_STATE_CHANGE_EXPR, revision.Description)), None)
-    if schedule_state_change:
-        path_to_root = get_path_to_root_project(project, root_project_name)
-        flow_state_arrival, flow_state_departure = extract_flow_states(revision, schedule_state_change)
-        return [
-            to_bq_row(
-                rally_item_id, 'DEPARTURE', schedule_state_change[1].upper(), revision.CreationDate,
-                path_to_root, flow_state_departure.upper()),
-            to_bq_row(
-                rally_item_id, 'ARRIVAL', schedule_state_change[2].upper(), revision.CreationDate,
-                path_to_root, flow_state_arrival.upper()
-            )
-        ]
-    return []
-
-
 # Helpers - BQ operations
 def events_table_is_empty(client):
     print(' - checking there is no data in BQ ...')
-    query = '''SELECT count(*) as row_count from rally.events'''
+    query = f'''SELECT count(*) as row_count from {SCHEDULE_EVENTS_TABLE}'''
     return next((x.row_count for x in client.query(query)), -1) == 0
 
 
 def insert_rows_into_bq(bq_client, bq_rows):
-    print(f' - inserting {len(bq_rows)} rows into BQ ...')
-    table_id = 'rally.events'
-    errors = bq_client.insert_rows_json(table_id, bq_rows, row_ids=[None] * len(bq_rows))
-    if errors:
-        print(f' --- encountered errors while inserting rows:')
-        for x in errors: print(f' ----- {x}')
+    batch_size = 10000
+    print(f' - inserting {len(bq_rows)} into BQ ...')
+    for index in range(0, len(bq_rows), batch_size):
+        batch_rows = bq_rows[index:index+batch_size]
+        print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...')
+        errors = bq_client.insert_rows_json(SCHEDULE_EVENTS_TABLE, batch_rows, row_ids=[None] * len(batch_rows))
+        if errors:
+            print(f' --- aborting due to the errors encountered while inserting rows:')
+            for x in errors: print(f' ----- {x}')
+            return
+        print(f' --- inserted {len(batch_rows)} rows into BQ.')
+    print(f' - done inserting {len(bq_rows)} into BQ.')
+
+
+def get_rally_item(rally, rally_id):
+    query = f'''FormattedID = "{rally_id}"'''
+    print(f''' - fetching rally object {rally_id} ...''')
+    entity_type = 'Defect' if rally_id[:2] == b'DE' else 'HierarchicalRequirement'
+    return next((x for x in rally.get(entity_type, query=query, projectScopeDown=True, fetch=True)), None)
 
 
 # Work In Progress
@@ -160,13 +202,11 @@ def scheduler(event, context):
 def updater(event, context):
     rally, workspace, project = initialize_rally()
     rally_id = base64.b64decode(event['data'])
-    query = f'''FormattedID = "{rally_id}"'''
-    print(f''' - fetching rally object {rally_id} ...''')
-    entity_type = 'Defect' if rally_id[:2] == b'DE' else 'HierarchicalRequirement'
-    rally_item = next((x for x in rally.get(entity_type, query=query, projectScopeDown=True, fetch=True)), None)
+    rally_item = get_rally_item(rally, rally_id)
     if rally_item:
         bq_rows = extract_bq_rows_from_item(item(rally_item), root_project_name=project)
-        print(bq_rows)
+        for x in bq_rows: print(x)
+        print(len(bq_rows))
     print(f'Done.')
 
 
@@ -181,8 +221,7 @@ def loader(from_date):
     rally, workspace, project = initialize_rally()
     fields = "FormattedID,LastUpdateDate,RevisionHistory,Owner,Project"
     items = get_stories_and_defects_from_rally(rally, workspace, project, fields, from_date)
-    bq_rows = extract_bq_rows_from_items(items, project)
-    print(len(bq_rows))
+    bq_rows = extract_bq_rows_from_items(items, root_project_name=project)
     insert_rows_into_bq(bq_client, bq_rows)
     print('Done.')
 

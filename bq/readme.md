@@ -7,9 +7,9 @@ Please, feel free to share your queries.
 Replace ```<value>``` with the path to your subproject.
 
 ```sql
-SELECT rally_id, schedule_state_name, event_type_name, timestamp, path_to_root FROM rally.events 
+SELECT * FROM rally.schedule_events 
 WHERE STARTS_WITH(path_to_root, "<value>") 
-ORDER By rally_id, timestamp, schedule_state_id;
+ORDER BY rally_id, timestamp, event_type_id, schedule_state_id;
 ```
 
 ## Data for Building Cycle Time Scatter-Plot or Histogram
@@ -24,13 +24,13 @@ SELECT
 FROM 
   (
     SELECT rally_id, MIN(timestamp) as arrival 
-    FROM rally.events 
+    FROM rally.schedule_events 
     WHERE schedule_state_name = 'IN-PROGRESS' AND event_type_name = 'ARRIVAL' 
     GROUP BY rally_id
   ) as arrivals,
   (
     SELECT rally_id, MAX(timestamp) as departure 
-    FROM rally.events 
+    FROM rally.schedule_events 
     WHERE schedule_state_name = 'ACCEPTED' AND event_type_name = 'ARRIVAL' 
     GROUP BY rally_id
   ) as departures
@@ -52,7 +52,7 @@ SELECT
 FROM 
   (
     SELECT rally_id, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
-    FROM rally.events 
+    FROM rally.schedule_events 
     WHERE schedule_state_name = 'ACCEPTED' AND event_type_name = 'ARRIVAL' 
     GROUP BY rally_id
   ) as departures

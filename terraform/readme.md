@@ -12,16 +12,18 @@ and obtain a Rally API key.
 
 Create an App Engine: ``` gcloud app create [--region=REGION]```
 
-You will need to enable multiple GCP APIs. We are listing the ones we remember,
-but you can just run ```terraform apply``` and fix the errors:
-* Service Usage
-* Cloud Build
-* Cloud Functions 
-* Cloud Pub/Sub 
-* Cloud Resource Manager
-* App Engine Admin
-* Cloud Scheduler
-* BigQuery
+You will need to enable multiple GCP APIs:
+```bash
+gcloud services enable cloudresourcemanager.googleapis.com
+gcloud services enable cloudbilling.googleapis.com
+gcloud services enable iam.googleapis.com
+gcloud services enable compute.googleapis.com
+gcloud services enable serviceusage.googleapis.com
+gcloud services enable bigquery.googleapis.com
+gcloud services enable bigquerystorage.googleapis.com
+gcloud services enable cloudfunctions.googleapis.com
+gcloud services enable pubsub.googleapis.com
+```
 
 Init your Terraform project:
 

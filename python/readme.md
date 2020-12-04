@@ -55,5 +55,5 @@ python main.py updater <rally-formatted-id>
 
 ## TODO
 
-* Add support for Ready-to-Pull
-* Add support for Blocked
+* Add a separate table for flow events
+* Filter out older Rally items that get in because the re-org recently touched them (e.g. US212917)

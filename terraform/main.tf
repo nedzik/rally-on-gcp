@@ -6,11 +6,11 @@ provider "google" {
 }
 
 resource "google_pubsub_topic" "topic" {
-  name = "job-topic"
+  name = "rally-scheduler-topic"
 }
 
 resource "google_cloud_scheduler_job" "job" {
-  name        = "rally-job"
+  name        = "rally-scheduler-job"
   description = "a job to kick off the Rally updater"
   schedule    = "*/15 * * * *"
 
@@ -21,7 +21,7 @@ resource "google_cloud_scheduler_job" "job" {
 }
 
 resource "google_storage_bucket" "deployment_bucket" {
-  name = "rally-on-gcp-001" # This bucket name must be unique
+  name = "rally-on-gcp-deployment"
 }
 
 data "archive_file" "src" {
@@ -37,7 +37,7 @@ resource "google_storage_bucket_object" "archive" {
 }
 
 resource "google_cloudfunctions_function" "scheduler_function" {
-  name        = "scheduled-cloud-function"
+  name        = "rally-scheduler-function"
   description = "A Cloud Function that is triggered by a Cloud Schedule."
   runtime     = "python37"
 
@@ -66,9 +66,9 @@ resource "google_bigquery_dataset" "rally" {
   description                 = "Dataset for Rally statistics"
 }
 
-resource "google_bigquery_table" "events" {
+resource "google_bigquery_table" "schedule_events" {
   dataset_id = google_bigquery_dataset.rally.dataset_id
-  table_id   = "events"
+  table_id   = "schedule_events"
   schema = <<EOF
 [
   {
@@ -114,10 +114,16 @@ resource "google_bigquery_table" "events" {
     "description": "Path to the Root Project"
   },
   {
-    "name": "flow_state",
+    "name": "blocked_state",
     "type": "STRING",
     "mode": "NULLABLE",
-    "description": "Flow State"
+    "description": "Blocked State (On|Off|Null)"
+  },
+  {
+    "name": "ready_state",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Ready State (On|Off|Null|"
   }
 ]
 EOF
