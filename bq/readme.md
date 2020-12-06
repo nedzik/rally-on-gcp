@@ -17,16 +17,18 @@ ORDER BY rally_id, timestamp, event_type_id, schedule_state_id;
 Add ```STARTS_WITH(path_to_root, "<value>")``` to ```WHERE``` clause to filter.
 
 ```sql
+CREATE VIEW rally.schedule_cycle_times AS
 SELECT 
   arrivals.rally_id as rally_id, 
   TIMESTAMP_DIFF(departures.departure, arrivals.arrival, DAY) + 1 as cycle_time_in_days, 
-  EXTRACT(DATE FROM departures.departure AT TIME ZONE "America/Chicago") as completion_date 
+  EXTRACT(DATE FROM departures.departure AT TIME ZONE "America/Chicago") as completion_date,
+  arrivals.path
 FROM 
   (
-    SELECT rally_id, MIN(timestamp) as arrival 
+    SELECT rally_id, path_to_root as path, MIN(timestamp) as arrival 
     FROM rally.schedule_events 
     WHERE schedule_state_name = 'IN-PROGRESS' AND event_type_name = 'ARRIVAL' 
-    GROUP BY rally_id
+    GROUP BY rally_id, path_to_root
   ) as arrivals,
   (
     SELECT rally_id, MAX(timestamp) as departure 

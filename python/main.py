@@ -5,11 +5,13 @@ import sys
 import functools
 import operator
 import datetime
+import pytz
 
 from google.cloud import bigquery
 from pyral import Rally, rallyWorkset
 
-SCHEDULE_EVENTS_TABLE='rally.schedule_events'
+UTC = pytz.UTC
+SCHEDULE_EVENTS_TABLE = 'rally.schedule_events'
 SCHEDULE_STATE_CHANGE_EXPR = r'SCHEDULE STATE changed from \[(.+?)\] to \[(.+?)\]'
 READY_CHANGE_EXPR = r'READY changed from \[(.+?)\] to \[(.+?)\]'
 BLOCKED_STATE_CHANGE_EXPR = r'BLOCKED changed from \[(.+?)\] to \[(.+?)\]'
@@ -182,21 +184,73 @@ def get_rally_item(rally, rally_id):
     return next((x for x in rally.get(entity_type, query=query, projectScopeDown=True, fetch=True)), None)
 
 
-# Work In Progress
+# Helpers - Scheduler Logic
+def extract_new_bq_rows_from_candidates(candidate_rally_items, timestamps_by_id, root_project_name):
+    bq_rows = []
+    for candidate_item in candidate_rally_items:
+        rally_id, rally_last_updated, rally_item = candidate_item
+        rally_last_updated = to_datetime_utc(rally_last_updated)
+        print(f' - considering {rally_id}, last updated in Rally on {rally_last_updated} ...')
+        bq_last_updated = timestamps_by_id.get(rally_id, None)
+        if not bq_last_updated or bq_last_updated < rally_last_updated:
+            message = 'not yet in BQ' if not bq_last_updated else f'has new events after {bq_last_updated}'
+            print(f''' --- {message}. Processing ...''')
+            bq_rows += extract_new_bq_rows_from_candidate(
+                candidate_item, bq_last_updated, rally_last_updated, root_project_name)
+        else:
+            print(f' --- up-to-date in BQ (last time updated on {bq_last_updated}. Skipping ...')
+    return bq_rows
+
+
+def extract_new_bq_rows_from_candidate(candidate_rally_item, bq_last_updated, rally_last_updated, root_project_name):
+    bq_rows_from_item = extract_bq_rows_from_item(candidate_rally_item, root_project_name)
+    print(f' --- all items ({len(bq_rows_from_item)}) ...')
+    for x in bq_rows_from_item: print(x)
+    selected_bq_rows_from_item = [x for x in bq_rows_from_item if to_datetime_utc(x[u'timestamp']) > bq_last_updated] \
+        if bq_last_updated and bq_last_updated < rally_last_updated else bq_rows_from_item
+    print(f' --- selected items ({len(selected_bq_rows_from_item)})...')
+    for x in selected_bq_rows_from_item: print(x)
+    return selected_bq_rows_from_item
+
+
+def to_datetime_utc(timestamp):
+    return datetime.datetime.strptime(timestamp, TIMESTAMP_FORMAT).replace(tzinfo=UTC)
+
+
+def get_latest_timestamps_from_bq(bq_client, rally_items):
+    query = f'''
+            SELECT rally_id, max(timestamp) AS timestamp FROM {SCHEDULE_EVENTS_TABLE}
+            WHERE rally_id IN UNNEST(@CANDIDATES)
+            GROUP BY rally_id
+        '''
+    job_config = bigquery.QueryJobConfig()
+    candidate_ids = [x[0] for x in rally_items]
+    job_config.query_parameters = [bigquery.ArrayQueryParameter('CANDIDATES', 'STRING', candidate_ids)]
+    return dict([(x.rally_id, x.timestamp) for x in bq_client.query(query, job_config=job_config)])
+
+
 # Cloud Function handler for scanning for recently modified stories/defects
 # Takes the scan offset from RALLY_SCAN_OFFSET environment variable
 # For each found story/defect, issues a PubSub message that updater Cloud Function will process
 # noinspection PyUnusedLocal
 def scheduler(event, context):
+    print(' - starting the scheduler ...')
     rally, workspace, project = initialize_rally()
     rally_scan_offset = int(os.getenv('RALLY_SCAN_OFFSET', '1'))
+    print(' - scanning for candidates with new events ...')
     from_date = (datetime.datetime.now() - datetime.timedelta(days=rally_scan_offset)).strftime('%Y-%m-%d')
-    rally_items = get_stories_and_defects_from_rally(rally, workspace, project, "FormattedID,LastUpdateDate", from_date)
-    for i in rally_items: print(i[:-1])
+    fields = "FormattedID,LastUpdateDate,RevisionHistory,Owner,Project"
+    candidate_rally_items = get_stories_and_defects_from_rally(rally, workspace, project, fields, from_date)
+    if candidate_rally_items:
+        print(f' - found {len(candidate_rally_items)} candidates. Retrieving their info from BQ ...')
+        bq_client = bigquery.Client()
+        timestamps_by_id = get_latest_timestamps_from_bq(bq_client, candidate_rally_items)
+        bq_rows = extract_new_bq_rows_from_candidates(candidate_rally_items, timestamps_by_id, project)
+        insert_rows_into_bq(bq_client, bq_rows)
     print(f'Done.')
 
 
-# Work In Progress
+# Work In Progress (might end up not needing it)
 # Cloud Function to insert new events in BQ for the story/defect provider as data
 # noinspection PyUnusedLocal
 def updater(event, context):
