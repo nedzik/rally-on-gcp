@@ -12,7 +12,7 @@ resource "google_pubsub_topic" "topic" {
 resource "google_cloud_scheduler_job" "job" {
   name        = "rally-scheduler-job"
   description = "a job to kick off the Rally updater"
-  schedule    = "* */4 * * *"
+  schedule    = "0 */4 * * *"
 
   pubsub_target {
     topic_name = google_pubsub_topic.topic.id
