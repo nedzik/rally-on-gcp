@@ -164,7 +164,7 @@ def events_table_is_empty(client):
 
 def insert_rows_into_bq(bq_client, bq_rows):
     batch_size = 10000
-    print(f' - inserting {len(bq_rows)} into BQ ...')
+    print(f' - inserting {len(bq_rows)} row(s) into BQ ...')
     for index in range(0, len(bq_rows), batch_size):
         batch_rows = bq_rows[index:index+batch_size]
         print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...')
@@ -173,8 +173,8 @@ def insert_rows_into_bq(bq_client, bq_rows):
             print(f' --- aborting due to the errors encountered while inserting rows:')
             for x in errors: print(f' ----- {x}')
             return
-        print(f' --- inserted {len(batch_rows)} rows into BQ.')
-    print(f' - done inserting {len(bq_rows)} into BQ.')
+        print(f' --- inserted {len(batch_rows)} row(s) into BQ.')
+    print(f' - done inserting {len(bq_rows)} row(s) into BQ.')
 
 
 def get_rally_item(rally, rally_id):
