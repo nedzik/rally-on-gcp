@@ -235,6 +235,10 @@ def get_latest_timestamps_from_bq(bq_client, rally_items):
 # noinspection PyUnusedLocal
 def scheduler(event, context):
     print(' - starting the scheduler ...')
+    bq_client = bigquery.Client()
+    if events_table_is_empty(bq_client):
+        print(f' --- {SCHEDULE_EVENTS_TABLE} is still empty. Please perform the initial data load. Exiting ...')
+        return
     rally, workspace, project = initialize_rally()
     rally_scan_offset = int(os.getenv('RALLY_SCAN_OFFSET', '1'))
     print(' - scanning for candidates with new events ...')
@@ -243,7 +247,6 @@ def scheduler(event, context):
     candidate_rally_items = get_stories_and_defects_from_rally(rally, workspace, project, fields, from_date)
     if candidate_rally_items:
         print(f' - found {len(candidate_rally_items)} candidates. Retrieving their info from BQ ...')
-        bq_client = bigquery.Client()
         timestamps_by_id = get_latest_timestamps_from_bq(bq_client, candidate_rally_items)
         bq_rows = extract_new_bq_rows_from_candidates(candidate_rally_items, timestamps_by_id, project)
         insert_rows_into_bq(bq_client, bq_rows)
@@ -270,7 +273,7 @@ def loader(from_date):
     print(' - starting the loader ...')
     bq_client = bigquery.Client()
     if not events_table_is_empty(bq_client):
-        print(' --- BQ table rally_statistics.events is not empty or its status is unknown. Exiting ...')
+        print(f' --- {SCHEDULE_EVENTS_TABLE} is not empty or its status is unknown. Exiting ...')
         return
     rally, workspace, project = initialize_rally()
     fields = "FormattedID,LastUpdateDate,RevisionHistory,Owner,Project"
