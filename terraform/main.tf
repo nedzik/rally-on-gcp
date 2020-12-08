@@ -5,12 +5,27 @@ provider "google" {
   zone        = var.region_zone
 }
 
+# Generate a random vm name
+resource "random_string" "seed" {
+  length  = 6
+  upper   = false
+  number  = false
+  lower   = true
+  special = false
+}
+
+locals {
+  topic-name = "${random_string.seed.result}-rally-scheduler-topc"
+  job-name = "${random_string.seed.result}-rally-scheduler-job"
+  bucket-name = "${random_string.seed.result}-rally-on-gcp-deployment"
+}
+
 resource "google_pubsub_topic" "topic" {
-  name = "rally-scheduler-topic"
+  name = local.topic-name
 }
 
 resource "google_cloud_scheduler_job" "job" {
-  name        = "rally-scheduler-job"
+  name        = local.job-name
   description = "a job to kick off the Rally updater"
   schedule    = "1 */4 * * *"
 
@@ -21,7 +36,7 @@ resource "google_cloud_scheduler_job" "job" {
 }
 
 resource "google_storage_bucket" "deployment_bucket" {
-  name = "rally-on-gcp-deployment"
+  name = local.bucket-name
 }
 
 data "archive_file" "src" {

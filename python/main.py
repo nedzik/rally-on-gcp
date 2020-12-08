@@ -157,7 +157,7 @@ def extract_bq_rows_from_items(items, root_project_name):
 
 # Helpers - BQ operations
 def events_table_is_empty(client):
-    print(' - checking there is no data in BQ ...')
+    print(f' - checking there is no data in {SCHEDULE_EVENTS_TABLE} ...')
     query = f'''SELECT count(*) as row_count from {SCHEDULE_EVENTS_TABLE}'''
     return next((x.row_count for x in client.query(query)), -1) == 0
 
@@ -175,7 +175,7 @@ def get_latest_timestamps_from_bq(bq_client, rally_items):
 
 def insert_rows_into_bq(bq_client, bq_rows):
     batch_size = 10000
-    print(f' - inserting {len(bq_rows)} row(s) into BQ ...')
+    print(f' - inserting {len(bq_rows)} row(s) into {SCHEDULE_EVENTS_TABLE} ...')
     for index in range(0, len(bq_rows), batch_size):
         batch_rows = bq_rows[index:index+batch_size]
         print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...')
@@ -184,8 +184,8 @@ def insert_rows_into_bq(bq_client, bq_rows):
             print(f' --- aborting due to the errors encountered while inserting rows:')
             for x in errors: print(f' ----- {x}')
             return
-        print(f' --- inserted {len(batch_rows)} row(s) into BQ.')
-    print(f' - done inserting {len(bq_rows)} row(s) into BQ.')
+        print(f' --- inserted {len(batch_rows)} row(s) into {SCHEDULE_EVENTS_TABLE}.')
+    print(f' - done inserting {len(bq_rows)} row(s) into {SCHEDULE_EVENTS_TABLE}.')
 
 
 # Helpers - Scheduler Logic
@@ -194,15 +194,15 @@ def extract_new_bq_rows_from_candidates(candidate_rally_items, timestamps_by_id,
     for candidate_item in candidate_rally_items:
         rally_id, rally_last_updated, rally_item = candidate_item
         rally_last_updated = to_datetime_utc(rally_last_updated)
-        print(f' - considering {rally_id}, last updated in Rally on {rally_last_updated} ...')
+        print(f' - considering Rally item {rally_id}, last updated in Rally on {rally_last_updated} ...')
         bq_last_updated = timestamps_by_id.get(rally_id, None)
         if not bq_last_updated or bq_last_updated < rally_last_updated:
-            message = 'not yet in BQ' if not bq_last_updated else f'has new events after {bq_last_updated}'
+            message = 'a brand new item' if not bq_last_updated else f'the item has new events after {bq_last_updated}'
             print(f''' --- {message}. Processing ...''')
             bq_rows += extract_new_bq_rows_from_candidate(
                 candidate_item, bq_last_updated, rally_last_updated, root_project_name)
         else:
-            print(f' --- up-to-date in BQ (last time updated on {bq_last_updated}. Skipping ...')
+            print(f' --- up-to-date in {SCHEDULE_EVENTS_TABLE} (last time updated on {bq_last_updated}. Skipping ...')
     return bq_rows
 
 
