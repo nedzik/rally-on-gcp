@@ -40,19 +40,6 @@ within the scan window. One can run it outside of GCP by following these steps:
 python main.py scheduler
 ```
 
-## Testing Cloud Function Handler for Updater
-
-It is still WIP; we still do not even deploy the cloud function.
-The handler only prints out the events for the Rally item provided as a parameter. 
-One can run it outside of GCP by following these steps:
-
-* Ensure the pre-requisites
-* Set ```RALLY_SCAN_OFFSET``` to a different number of days if desired
-* Run the scheduler handler:
-```bash
-python main.py updater <rally-formatted-id>
-```
-
 ## TODO
 
 * Add a separate table for flow events

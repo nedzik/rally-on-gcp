@@ -8,8 +8,7 @@ and graphs. This project simply extracts data from Rally and
 puts it in BigQuery. One can perform the required analysis using 
 BigQuery's capability or advanced analytical tools that integrate with BigQuery.
 
-A scheduler runs periodically to keep the data in 
-BigQuery up to date.
+A scheduler runs periodically to keep the data in BigQuery up to date.
 
 As of the time of writing (11/29/2020), it is still WIP.
 
