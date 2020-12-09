@@ -3,6 +3,8 @@
 We tested it with a free-tier GCP account. Since the amount of data is not huge,
 using a free-tier account should be enough.  
 
+Currently, the scripts supports one deployment per a GCP project. 
+
 ## How to run
 
 Read the pre-requisites in the main ```readme.md```. 

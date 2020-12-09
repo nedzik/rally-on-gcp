@@ -40,6 +40,36 @@ WHERE
   arrivals.rally_id = departures.rally_id
 ```
 
+```sql
+CREATE VIEW rally.schedule_cycle_time_frequencies AS 
+SELECT cycle_time_in_days, path, count(*) as frequency FROM 
+(
+SELECT 
+  arrivals.rally_id as rally_id,
+  TIMESTAMP_DIFF(departures.departure, arrivals.arrival, DAY) + 1 as cycle_time_in_days, 
+  path
+FROM 
+  (
+    SELECT rally_id, path_to_root as path, MIN(timestamp) as arrival 
+    FROM rally.schedule_events 
+    WHERE schedule_state_name = 'IN-PROGRESS' AND event_type_name = 'ARRIVAL' 
+    GROUP BY rally_id, path_to_root
+  ) as arrivals,
+  (
+    SELECT rally_id, MAX(timestamp) as departure 
+    FROM rally.schedule_events 
+    WHERE schedule_state_name = 'ACCEPTED' AND event_type_name = 'ARRIVAL' 
+    GROUP BY rally_id
+  ) as departures
+WHERE 
+  arrivals.rally_id = departures.rally_id and path != ''
+) 
+WHERE 
+  cycle_time_in_days > 0 
+GROUP BY
+  cycle_time_in_days, path
+```
+
 ## Throughput Distribution by Date (for Monte-Carlo Simulations)
 
 Note that it just a sample and requires future work. For example, we need to exclude items that did not
@@ -62,4 +92,26 @@ GROUP BY
   departure
 ORDER BY 
   departure
+```
+
+## Report Deviations from the Recommended Flow Patterns
+
+```sql
+SELECT 
+  rally_id, ARRAY_TO_STRING(state_sequence, '->') as flow, path_to_root 
+FROM 
+  (
+    SELECT 
+      rally_id, path_to_root, ARRAY_AGG(SUBSTR(schedule_state_name, 0, 2) ORDER BY(timestamp)) as state_sequence 
+    FROM 
+      rally.schedule_events 
+    WHERE 
+      event_type_name = 'ARRIVAL' and path_to_root NOT IN ( '', 'Customer Data Hub', 'Customer Experience Manager' )
+    GROUP BY 
+      rally_id, path_to_root 
+  )
+WHERE 
+  ARRAY_TO_STRING(state_sequence, '->') NOT IN ( 'DE->IN', 'DE->IN->CO', 'DE->IN->CO->AC', 'DE->IN->CO->AC->RE' )
+ORDER BY 
+  path_to_root
 ```
