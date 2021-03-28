@@ -1,4 +1,4 @@
-# Data Loader, Cloud Function Handlers and Forecasters
+# Data Loader, Cloud Function Handlers and Monte-Carlo Forecaster
 
 ## Pre-requisites
 
@@ -29,7 +29,7 @@ export RALLY_SCAN_OFFSET=1
   from 07/01/2020 till 11/29/2020 for a ~150 strong org takes about 
   30 minutes due to how Rally navigates its object graph.
   
-## Testing Cloud Function Handler for Scheduler
+## Testing Cloud Function handler for Scheduler
 
 It is still WIP, only printing the Rally items that have changed
 within the scan window. One can run it outside of GCP by following these steps:
@@ -41,7 +41,7 @@ within the scan window. One can run it outside of GCP by following these steps:
 python main.py scheduler
 ```
 
-## Getting a list of the Rally paths available in BQ dataset
+## Getting Rally paths available in the BQ dataset
 
 To filter data in BQ dataset or run Monte-Carlo forecasts, it is necessary to know which Rally path to apply. 
 The script provides a utility mode for getting all paths available in BQ dataset:
@@ -50,7 +50,7 @@ The script provides a utility mode for getting all paths available in BQ dataset
     python main.py list-paths
 ```
 
-## Running a Monte-Carlo forecast
+## Running a Monte-Carlo simulation
 
 To run a Monte-Carlo forecast against throughput data in the BQ dataset, use the following command:
 
