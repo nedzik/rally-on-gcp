@@ -1,11 +1,15 @@
+#!/usr/bin/env python
+
 import datetime
 import functools
 import operator
 import os
 import re
-import sys
 
+import click
 import pytz
+import pandas as pd
+from random import choice
 from google.cloud import bigquery
 from pyral import Rally, rallyWorkset
 
@@ -177,7 +181,7 @@ def insert_rows_into_bq(bq_client, bq_rows):
     batch_size = 10000
     print(f' - inserting {len(bq_rows)} row(s) into {SCHEDULE_EVENTS_TABLE} ...')
     for index in range(0, len(bq_rows), batch_size):
-        batch_rows = bq_rows[index:index+batch_size]
+        batch_rows = bq_rows[index:index + batch_size]
         print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...')
         errors = bq_client.insert_rows_json(SCHEDULE_EVENTS_TABLE, batch_rows, row_ids=[None] * len(batch_rows))
         if errors:
@@ -246,26 +250,146 @@ def scheduler(event, context):
 
 # Bulk loader of Rally events into BQ. Scans for all stories/defects that have been updates since from_date
 # noinspection PyUnresolvedReferences
-def loader(from_date):
-    print(' - starting the loader ...')
+@click.command()
+@click.option('-f', '--from-date', type=click.DateTime(formats=['%Y-%m-%d']), default='2020-07-01')
+def load_schedule_events(from_date):
+    print(f' - starting the loader ...')
+    print(f' --- will attempt to load schedule events starting from {from_date:%Y-%m-%d}')
     bq_client = bigquery.Client()
     if not events_table_is_empty(bq_client):
         print(f' --- {SCHEDULE_EVENTS_TABLE} is not empty or its status is unknown. Exiting ...')
         return
     rally, workspace, project = initialize_rally()
-    items = get_stories_and_defects_from_rally(rally, workspace, project, from_date)
+    items = get_stories_and_defects_from_rally(rally, workspace, project, f'{from_date:%Y-%m-%d}')
     bq_rows = extract_bq_rows_from_items(items, root_project_name=project)
     insert_rows_into_bq(bq_client, bq_rows)
     print('Done.')
 
 
+@click.group()
+def cli():
+    pass
+
+
+@click.command()
+def sync():
+    scheduler({}, {})
+
+
+@click.command(help='lists available paths available in BQ dataset')
+def list_paths():
+    bq_client = bigquery.Client()
+    query = f'''SELECT DISTINCT path_to_root as row_count from {SCHEDULE_EVENTS_TABLE} ORDER BY path_to_root'''
+    for x in bq_client.query(query): print(x[0])
+
+
+def is_within_date_range(date_range, date):
+    if len(date_range) == 2:
+        return date_range[0].date() <= date <= date_range[1].date()
+    return True
+
+
+def prepare_throughput_data(bq_data, date_range):
+    start_date = min(bq_data.keys())
+    start_date = min(start_date, date_range[0].date()) if len(date_range) == 2 else start_date
+    end_date = max(bq_data.keys())
+    end_date = max(end_date, date_range[1].date()) if len(date_range) == 2 else end_date
+    dates = [start_date + datetime.timedelta(days=x) for x in range((end_date - start_date).days + 1)]
+    dates = [x for x in dates if x.isoweekday() < 6]
+    return [bq_data.get(x, 0) for x in dates]
+
+
+def get_throughput_data_from_bq(bq_client, path_to_root, sample_date_range):
+    query = f'''
+        SELECT 
+          departure as completion_date,
+          count(*) as throughput 
+        FROM 
+          (
+            SELECT 
+                rally_id, EXTRACT(DATE from MAX(timestamp) AT TIME ZONE "America/Chicago") as departure 
+            FROM 
+                rally.schedule_events 
+            WHERE 
+                schedule_state_name = 'ACCEPTED' AND event_type_name = 'ARRIVAL' AND 
+                STARTS_WITH(path_to_root, @PATH_TO_ROOT)
+            GROUP BY rally_id
+          ) as departures
+        GROUP BY
+          departure
+        ORDER BY 
+          departure
+    '''
+    job_config = bigquery.QueryJobConfig()
+    job_config.query_parameters = [bigquery.ScalarQueryParameter('PATH_TO_ROOT', 'STRING', path_to_root)]
+    return dict([
+        (x.completion_date, x.throughput) for x in bq_client.query(query, job_config=job_config) if
+        is_within_date_range(sample_date_range, x.completion_date)
+    ])
+
+
+def run_simulation(throughput_data, backlog_size):
+    remaining_backlog = backlog_size
+    days = 0
+    current_date = datetime.date.today()
+    # TODO: limit the number of cycles to avoid infinite loops
+    while remaining_backlog > 0:
+        remaining_backlog -= choice(throughput_data) if current_date.isoweekday() < 6 else 0
+        current_date += datetime.timedelta(days=1)
+        days += 1
+    return days
+
+
+def extract_results(outcomes):
+    summary = pd.DataFrame({'effort': outcomes}).describe(percentiles=[.025, 0.05, 0.075, 0.925, 0.95, .975])
+    ci_95_lower = next(summary.filter(regex=r'^2\.5%$', axis=0).itertuples()).effort
+    ci_95_upper = next(summary.filter(regex=r'^97\.5%$', axis=0).itertuples()).effort
+    ci_90_lower = next(summary.filter(regex='^5%$', axis=0).itertuples()).effort
+    ci_90_upper = next(summary.filter(regex='^95%$', axis=0).itertuples()).effort
+    ci_85_lower = next(summary.filter(regex='^7.5%$', axis=0).itertuples()).effort
+    ci_85_upper = next(summary.filter(regex='^92.5%$', axis=0).itertuples()).effort
+    return ci_85_lower, ci_85_upper, ci_90_lower, ci_90_upper, ci_95_lower, ci_95_upper
+
+
+def format_date_range(date_range):
+    return 'all available' if len(date_range) != 2 else \
+        f'''within [{date_range[0]:%Y-%m-%d}, {date_range[1]:%Y-%m-%d}]'''
+
+
+def get_date(ci_95_lower):
+    return datetime.date.today() + datetime.timedelta(days=ci_95_lower)
+
+
+DATE_RANGE_HELP = 'use throughput data from within the date range'
+
+
+@click.command(help='runs a Monte-Carlo simulation using throughput data from BQ dataset')
+@click.argument('backlog-size', type=int)
+@click.argument('path-to-root')
+@click.option('-r', '--sample-date-range', nargs=2, type=click.DateTime(formats=['%Y-%m-%d']), help=DATE_RANGE_HELP)
+@click.option('-c', '--experiment-count', 'count', default=1000, type=int, show_default=True)
+# TODO: add support for how-much-we-can-do-by-date mode
+# TODO: add support for options: a) weekday-to-weekday simulation, b) include weekends
+def forecast(backlog_size, path_to_root, sample_date_range, count):
+    print(f' - starting the forecaster ...')
+    print(f' --- backlog size: {backlog_size} items')
+    print(f''' --- path to root starting with: '{path_to_root}' ''')
+    print(f''' --- throughput data: {format_date_range(sample_date_range)}''')
+    print(f' --- experiment count: {count}')
+    bq_client = bigquery.Client()
+    bq_throughput_data = get_throughput_data_from_bq(bq_client, path_to_root, sample_date_range)
+    data = prepare_throughput_data(bq_throughput_data, sample_date_range)
+    results = [run_simulation(data, backlog_size) for _ in range(count)]
+    _, _, _, _, ci_95_lower, ci_95_upper = extract_results(results)
+    print(f'')
+    print(f'''95% CI (days): [{ci_95_lower:.0f}, {ci_95_upper:.0f}]''')
+    print(f'''95% CI (dates from today): [{get_date(ci_95_lower)}, {get_date(ci_95_upper)}]''')
+
+
 # Main Entry to run the loader and to test Cloud Function handlers
 if __name__ == '__main__':
-    action = sys.argv[1] if len(sys.argv) > 1 else 'load'
-    if action == 'scheduler':
-        scheduler({}, {})
-    elif action == 'loader':
-        loader(sys.argv[2] if len(sys.argv) > 2 else '2020-07-01')
-    else:
-        print(f'Unknown action: {action}')
-        sys.exit(1)
+    cli.add_command(load_schedule_events)
+    cli.add_command(sync)
+    cli.add_command(forecast)
+    cli.add_command(list_paths)
+    cli()

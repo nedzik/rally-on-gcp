@@ -17,12 +17,13 @@ export GOOGLE_APPLICATION_CREDENTIALS=~/.gcloud/your-key.json
 export RALLY_SCAN_OFFSET=1
 ```
 
-## How to run the loader
+## Loading the data
 
 * Ensure the pre-requisites
 * Run the loader (replace ```2020-11-01``` with your "from" date):
 ```bash
-    python main.py loader 2020-11-01
+    python main.py loader --from-date 2020-11-01
+    python main.py loader -f 2020-11-01
 ```
 * The loader will show the progress - currently loading the data
   from 07/01/2020 till 11/29/2020 for a ~150 strong org takes about 
@@ -39,6 +40,35 @@ within the scan window. One can run it outside of GCP by following these steps:
 ```bash
 python main.py scheduler
 ```
+
+## Getting a list of the Rally paths available in BQ dataset
+
+To filter data in BQ dataset or run Monte-Carlo forecasts, it is necessary to know which Rally path to apply. 
+The script provides a utility mode for getting all paths available in BQ dataset:
+
+```bash
+    python main.py list-paths
+```
+
+## Running a Monte-Carlo forecast
+
+To run a Monte-Carlo forecast against throughput data in the BQ dataset, use the following command:
+
+```bash
+    python main.py forecast 200 'Games/Minecraft' -r 2021-03-14 2021-03-27 -c 100
+```
+
+The above command runs a Monte-Carlo simulation consisting of 100 experiments. If ```-c``` option is not provided,
+the script uses the default of 1,000 experiments. The script tries to calculate how many days it would take
+to complete a backlog of N items (200 in the example). The script uses the throughput data collected from
+the BQ dataset for the provided path (the ```Games/Minecraft``` teams) and within the specified data range
+(```2021-03-14``` ```2021-03-27```). If the data range is absent, the script uses all throughput data 
+available for the path in question. 
+
+Note that the path argument works as a prefix, i.e., the script collects and combines the throughput data
+for all projects/teams whose Rally path starts with the path argument. Use with caution.
+
+For the full help on the forecast mode, run ```python main.py forecast --help```
 
 ## TODO
 
