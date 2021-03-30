@@ -11,7 +11,7 @@ import pytz
 from google.cloud import bigquery
 from pyral import Rally, rallyWorkset
 
-from forecast import prepare_throughput_data, get_throughput_data_from_bq, run_simulation
+from forecast import prepare_throughput_data, get_throughput_data_from_bq, get_simulation
 from forecast import print_information_header, print_simulation_results
 
 UTC = pytz.UTC
@@ -314,22 +314,23 @@ def list_paths():
     for x in bq_client.query(query): print(x[0])
 
 
+FORECAST_HELP = 'runs a simulation with backlog size or future date goal using throughput data from the BQ dataset'
 DATE_RANGE_HELP = 'use throughput data from within the date range'
 
 
-@click.command(help='runs a Monte-Carlo simulation using throughput data from BQ dataset')
-@click.argument('backlog-size', type=int)
+@click.command(help=FORECAST_HELP)
+@click.argument('goal')
 @click.argument('path-to-root')
 @click.option('-r', '--sample-date-range', nargs=2, type=click.DateTime(formats=['%Y-%m-%d']), help=DATE_RANGE_HELP)
 @click.option('-c', '--experiment-count', 'count', default=1000, type=int, show_default=True)
-# TODO: add support for how-much-we-can-do-by-date mode
 # TODO: add support for options: a) weekday-to-weekday simulation, b) include weekends
-def forecast(backlog_size, path_to_root, sample_date_range, count):
-    print_information_header(backlog_size, count, path_to_root, sample_date_range)
+def forecast(goal, path_to_root, sample_date_range, count):
+    print_information_header(goal, count, path_to_root, sample_date_range)
     bq_throughput_data = get_throughput_data_from_bq(bigquery.Client(), path_to_root, sample_date_range)
     data = prepare_throughput_data(bq_throughput_data, sample_date_range)
-    results = [run_simulation(data, backlog_size) for _ in range(count)]
-    print_simulation_results(results)
+    run_simulation = get_simulation(goal)
+    results = [run_simulation(data, goal) for _ in range(count)]
+    print_simulation_results(results, goal)
 
 
 if __name__ == '__main__':

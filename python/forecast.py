@@ -45,8 +45,47 @@ def get_throughput_data_from_bq(bq_client, path_to_root, sample_date_range):
     ])
 
 
-def run_simulation(throughput_data, backlog_size):
-    remaining_backlog = backlog_size
+def is_backlog_goal(goal):
+    try:
+        return int(goal) > 0
+    except ValueError:
+        return False
+
+
+def is_future_date_goal(goal):
+    try:
+        return datetime.datetime.strptime(goal, '%Y-%m-%d') > datetime.datetime.now()
+    except ValueError:
+        return False
+
+
+def get_goal_description(goal):
+    return f'{goal} items in backlog' if is_backlog_goal(goal) else \
+        f'number of items completed by {goal}' if is_future_date_goal(goal) else f'unsupported - {goal}'
+
+
+def get_simulation(goal):
+    if is_backlog_goal(goal):
+        return run_backlog_simulation
+    elif is_future_date_goal(goal):
+        return run_future_date_simulation
+    else:
+        raise ValueError(f'Unsupported simulation goal: {goal}')
+
+
+def run_future_date_simulation(throughput_data, goal):
+    completed_items = 0
+    future_date = datetime.datetime.strptime(goal, '%Y-%m-%d').date()
+    current_date = datetime.date.today()
+    # TODO: limit the number of cycles to avoid infinite loops
+    while current_date < future_date:
+        completed_items += choice(throughput_data) if current_date.isoweekday() < 6 else 0
+        current_date += datetime.timedelta(days=1)
+    return completed_items
+
+
+def run_backlog_simulation(throughput_data, goal):
+    remaining_backlog = int(goal)
     days = 0
     current_date = datetime.date.today()
     # TODO: limit the number of cycles to avoid infinite loops
@@ -66,18 +105,21 @@ def get_date(ci_95_lower):
     return datetime.date.today() + datetime.timedelta(days=ci_95_lower)
 
 
-def print_information_header(backlog_size, count, path_to_root, sample_date_range):
+def print_information_header(goal, count, path_to_root, sample_date_range):
     print(f' - starting the forecaster ...')
-    print(f' --- backlog size: {backlog_size} items')
+    print(f' --- goal: {get_goal_description(goal)}')
     print(f''' --- path to root starting with: '{path_to_root}' ''')
     print(f''' --- throughput data: {format_date_range(sample_date_range)}''')
     print(f' --- experiment count: {count}')
 
 
-def print_simulation_results(results):
+def print_simulation_results(results, goal):
     summary = pd.DataFrame({'effort': results}).describe(percentiles=[.025, 0.05, 0.075, 0.925, 0.95, .975])
     ci_95_lower = next(summary.filter(regex=r'^2\.5%$', axis=0).itertuples()).effort
     ci_95_upper = next(summary.filter(regex=r'^97\.5%$', axis=0).itertuples()).effort
     print(f' - results:')
-    print(f'''95% CI (days): [{ci_95_lower:.0f}, {ci_95_upper:.0f}]''')
-    print(f'''95% CI (dates from today): [{get_date(ci_95_lower)}, {get_date(ci_95_upper)}]''')
+    if is_backlog_goal(goal):
+        print(f'''95% CI (days): [{ci_95_lower:.0f}, {ci_95_upper:.0f}]''')
+        print(f'''95% CI (dates from today): [{get_date(ci_95_lower)}, {get_date(ci_95_upper)}]''')
+    elif is_future_date_goal(goal):
+        print(f'''95% CI (items completed by {goal}): [{int(ci_95_lower)}, {int(ci_95_upper)}]''')
