@@ -63,7 +63,7 @@ resource "google_cloudfunctions_function" "scheduler_function" {
     RALLY_SCAN_OFFSET = var.rally_scan_offset
   }
 
-  available_memory_mb   = 128
+  available_memory_mb   = 256
   source_archive_bucket = google_storage_bucket.deployment_bucket.name
   source_archive_object = google_storage_bucket_object.archive.name
   timeout               = 500
@@ -139,6 +139,27 @@ resource "google_bigquery_table" "schedule_events" {
     "type": "STRING",
     "mode": "NULLABLE",
     "description": "Ready State (On|Off|Null|"
+  }
+]
+EOF
+}
+
+resource "google_bigquery_table" "items" {
+  dataset_id = google_bigquery_dataset.rally.dataset_id
+  table_id   = "items"
+  schema = <<EOF
+[
+  {
+    "name": "rally_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Rally Object's Formatted ID"
+  },
+  {
+    "name": "plan_estimate",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Plan Estimate"
   }
 ]
 EOF

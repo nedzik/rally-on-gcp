@@ -115,3 +115,33 @@ WHERE
 ORDER BY 
   path_to_root
 ```
+
+## Cycle Time vs. Estimate
+
+```sql
+SELECT 
+    cycle_times.rally_id AS rally_id, 
+    CAST(cycle_time_in_days AS float64) AS cycle_time_in_days, 
+    CAST(plan_estimate AS float64) AS estimate_in_story_points, 
+    cycle_times.path AS path 
+FROM 
+    rally.schedule_cycle_times AS cycle_times, 
+    rally.items AS items 
+WHERE 
+    cycle_times.rally_id = items.rally_id AND plan_estimate IS NOT NULL AND plan_estimate != 0
+```
+
+## Cycle Time Frequencies (To Check the Histogram)
+
+```sql
+SELECT 
+    COUNT(*) AS frequency, cycle_time_in_days 
+FROM 
+    rally.schedule_cycle_times 
+WHERE 
+    path = 'your path' 
+GROUP BY 
+    cycle_time_in_days 
+ORDER BY 
+    cycle_time_in_days
+```

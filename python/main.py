@@ -16,6 +16,7 @@ from forecast import print_information_header, print_simulation_results
 
 UTC = pytz.UTC
 SCHEDULE_EVENTS_TABLE = 'rally.schedule_events'
+ITEMS_TABLE = 'rally.items'
 SCHEDULE_STATE_CHANGE_EXPR = r'SCHEDULE STATE changed from \[(.+?)\] to \[(.+?)\]'
 READY_CHANGE_EXPR = r'READY changed from \[(.+?)\] to \[(.+?)\]'
 BLOCKED_STATE_CHANGE_EXPR = r'BLOCKED changed from \[(.+?)\] to \[(.+?)\]'
@@ -59,15 +60,14 @@ def item(rally_item):
     return rally_item.FormattedID, rally_item.LastUpdateDate, rally_item
 
 
-def get_stories_and_defects_from_rally(rally, workspace, project, from_date):
-    fields = "FormattedID,LastUpdateDate,RevisionHistory,Owner,Project"
+def get_stories_and_defects_from_rally(rally, workspace, project, from_date, fields):
     stories = [item(i) for i in get_items_from_rally(rally, workspace, project, 'UserStory', from_date, fields)]
     defects = [item(i) for i in get_items_from_rally(rally, workspace, project, 'Defect', from_date, fields)]
     return stories + defects
 
 
 # Helpers - Rally to BQ conversion
-def to_bq_row(rally_id, event_type, schedule_state, timestamp, path, blocked_state, ready_state):
+def to_bq_schedule_event_row(rally_id, event_type, schedule_state, timestamp, path, blocked_state, ready_state):
     return {
         u'rally_id': rally_id,
         u'schedule_state_id': SCHEDULE_STATE_ID_MAP.get(schedule_state, 99),
@@ -78,6 +78,13 @@ def to_bq_row(rally_id, event_type, schedule_state, timestamp, path, blocked_sta
         u'path_to_root': path,
         u'blocked_state': blocked_state,
         u'ready_state': ready_state
+    }
+
+
+def to_bq_item_row(rally_id, plan_estimate):
+    return {
+        u'rally_id': rally_id,
+        u'plan_estimate': plan_estimate
     }
 
 
@@ -113,18 +120,18 @@ def extract_bq_rows_from_revision(rally_item_id, revision, path_to_root):
     ready_state_to = extract_ready_state(revision)
     if schedule_state_change:
         return [
-            to_bq_row(
+            to_bq_schedule_event_row(
                 rally_item_id, 'DEPARTURE', schedule_state_change[1].upper(), revision.CreationDate,
                 path_to_root, None, None
             ),
-            to_bq_row(
+            to_bq_schedule_event_row(
                 rally_item_id, 'ARRIVAL', schedule_state_change[2].upper(), revision.CreationDate,
                 path_to_root, blocked_state_to, ready_state_to
             )
         ]
     elif blocked_state_to or ready_state_to:
         return [
-            to_bq_row(
+            to_bq_schedule_event_row(
                 rally_item_id, 'OTHER', UNKNOWN, revision.CreationDate, path_to_root,
                 blocked_state_to, ready_state_to
             )
@@ -161,9 +168,9 @@ def extract_bq_rows_from_items(items, root_project_name):
 
 
 # Helpers - BQ operations
-def events_table_is_empty(client):
-    print(f' - checking there is no data in {SCHEDULE_EVENTS_TABLE} ...')
-    query = f'''SELECT count(*) as row_count from {SCHEDULE_EVENTS_TABLE}'''
+def events_table_is_empty(client, table):
+    print(f' - checking there is no data in {table  } ...')
+    query = f'''SELECT count(*) as row_count from {table}'''
     return next((x.row_count for x in client.query(query)), -1) == 0
 
 
@@ -178,19 +185,19 @@ def get_latest_timestamps_from_bq(bq_client, rally_items):
     return dict([(x.rally_id, x.timestamp) for x in bq_client.query(query, job_config=job_config)])
 
 
-def insert_rows_into_bq(bq_client, bq_rows):
+def insert_rows_into_bq(bq_client, bq_table, bq_rows):
     batch_size = 10000
-    print(f' - inserting {len(bq_rows)} row(s) into {SCHEDULE_EVENTS_TABLE} ...')
+    print(f' - inserting {len(bq_rows)} row(s) into {bq_table} ...')
     for index in range(0, len(bq_rows), batch_size):
         batch_rows = bq_rows[index:index + batch_size]
         print(f' --- inserting next {len(batch_rows)} rows starting from offset {index} ...')
-        errors = bq_client.insert_rows_json(SCHEDULE_EVENTS_TABLE, batch_rows, row_ids=[None] * len(batch_rows))
+        errors = bq_client.insert_rows_json(bq_table, batch_rows, row_ids=[None] * len(batch_rows))
         if errors:
             print(f' --- aborting due to the errors encountered while inserting rows:')
             for x in errors: print(f' ----- {x}')
             return
-        print(f' --- inserted {len(batch_rows)} row(s) into {SCHEDULE_EVENTS_TABLE}.')
-    print(f' - done inserting {len(bq_rows)} row(s) into {SCHEDULE_EVENTS_TABLE}.')
+        print(f' --- inserted {len(batch_rows)} row(s) into {bq_table}.')
+    print(f' - done inserting {len(bq_rows)} row(s) into {bq_table}.')
 
 
 # Helpers - Scheduler Logic
@@ -233,19 +240,20 @@ def to_datetime_utc(timestamp):
 def scheduler(event, context):
     print(' - starting the scheduler ...')
     bq_client = bigquery.Client()
-    if events_table_is_empty(bq_client):
+    if events_table_is_empty(bq_client, SCHEDULE_EVENTS_TABLE):
         print(f' --- {SCHEDULE_EVENTS_TABLE} is still empty. Please perform the initial data load. Exiting ...')
         return
     rally, workspace, project = initialize_rally()
     rally_scan_offset = int(os.getenv('RALLY_SCAN_OFFSET', '1'))
     print(' - scanning for candidates with new events ...')
     from_date = (datetime.datetime.now() - datetime.timedelta(days=rally_scan_offset)).strftime('%Y-%m-%d')
-    candidate_rally_items = get_stories_and_defects_from_rally(rally, workspace, project, from_date)
+    fields = "FormattedID,LastUpdateDate,RevisionHistory,Owner,Project"
+    candidate_rally_items = get_stories_and_defects_from_rally(rally, workspace, project, from_date, fields)
     if candidate_rally_items:
         print(f' - found {len(candidate_rally_items)} candidates. Retrieving their info from BQ ...')
         timestamps_by_id = get_latest_timestamps_from_bq(bq_client, candidate_rally_items)
         bq_rows = extract_new_bq_rows_from_candidates(candidate_rally_items, timestamps_by_id, project)
-        insert_rows_into_bq(bq_client, bq_rows)
+        insert_rows_into_bq(bq_client, SCHEDULE_EVENTS_TABLE, bq_rows)
     print(f'Done.')
 
 
@@ -254,16 +262,38 @@ def scheduler(event, context):
 @click.command()
 @click.option('-f', '--from-date', type=click.DateTime(formats=['%Y-%m-%d']), default='2020-07-01')
 def load_schedule_events(from_date):
-    print(f' - starting the loader ...')
+    print(f' - starting the schedule event loader ...')
     print(f' --- will attempt to load schedule events starting from {from_date:%Y-%m-%d}')
     bq_client = bigquery.Client()
-    if not events_table_is_empty(bq_client):
+    if not events_table_is_empty(bq_client, SCHEDULE_EVENTS_TABLE):
         print(f' --- {SCHEDULE_EVENTS_TABLE} is not empty or its status is unknown. Exiting ...')
         return
     rally, workspace, project = initialize_rally()
-    items = get_stories_and_defects_from_rally(rally, workspace, project, f'{from_date:%Y-%m-%d}')
+    fields = "FormattedID,LastUpdateDate,RevisionHistory,Owner,Project"
+    items = get_stories_and_defects_from_rally(rally, workspace, project, f'{from_date:%Y-%m-%d}', fields)
     bq_rows = extract_bq_rows_from_items(items, root_project_name=project)
-    insert_rows_into_bq(bq_client, bq_rows)
+    insert_rows_into_bq(bq_client, SCHEDULE_EVENTS_TABLE, bq_rows)
+    print('Done.')
+
+
+def extract_bq_item_rows_from_items(items):
+    return [to_bq_item_row(x[0], x[-1].PlanEstimate) for x in items]
+
+
+@click.command()
+@click.option('-f', '--from-date', type=click.DateTime(formats=['%Y-%m-%d']), default='2020-07-01')
+def load_items(from_date):
+    print(f' - starting the schedule event loader ...')
+    print(f' --- will attempt to load schedule events starting from {from_date:%Y-%m-%d}')
+    bq_client = bigquery.Client()
+    if not events_table_is_empty(bq_client, ITEMS_TABLE):
+        print(f' --- {ITEMS_TABLE} is not empty or its status is unknown. Exiting ...')
+        return
+    rally, workspace, project = initialize_rally()
+    fields = 'FormattedID,LastUpdateDate,PlanEstimate'
+    items = get_stories_and_defects_from_rally(rally, workspace, project, f'{from_date:%Y-%m-%d}', fields)
+    bq_rows = extract_bq_item_rows_from_items(items)
+    insert_rows_into_bq(bq_client, ITEMS_TABLE, bq_rows)
     print('Done.')
 
 
@@ -304,6 +334,7 @@ def forecast(backlog_size, path_to_root, sample_date_range, count):
 
 if __name__ == '__main__':
     cli.add_command(load_schedule_events)
+    cli.add_command(load_items)
     cli.add_command(sync)
     cli.add_command(forecast)
     cli.add_command(list_paths)
