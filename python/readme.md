@@ -52,16 +52,24 @@ The script provides a utility mode for getting all paths available in BQ dataset
 
 ## Running a Monte-Carlo simulation
 
-To run a Monte-Carlo forecast against throughput data in the BQ dataset, use the following command:
+To run a Monte-Carlo forecast against throughput data in the BQ dataset, use the command below.
+
+For backlog size mode (how long will it take to complete 200 items), use the following syntax:
 
 ```bash
     python main.py forecast 200 'Games/Minecraft' -r 2021-03-14 2021-03-27 -c 100
 ```
 
-The above command runs a Monte-Carlo simulation consisting of 100 experiments. If ```-c``` option is not provided,
-the script uses the default of 1,000 experiments. The script tries to calculate how many days it would take
-to complete a backlog of N items (200 in the example). The script uses the throughput data collected from
-the BQ dataset for the provided path (the ```Games/Minecraft``` teams) and within the specified data range
+For future date mode (how many items will get done by 2021-11-01), use the following syntax:
+
+```bash
+    python main.py forecast 2021-11-01 'Games/Minecraft' -r 2021-03-14 2021-03-27 -c 100
+```
+
+The above commands run Monte-Carlo simulations consisting of ```100``` experiments. 
+If ```-c``` option is not provided, the script uses the default of ```1,000``` experiments. 
+The script uses the throughput data collected from the BQ dataset for the provided path 
+(the ```Games/Minecraft``` teams) and within the specified data range
 (```2021-03-14``` ```2021-03-27```). If the data range is absent, the script uses all throughput data 
 available for the path in question. 
 
